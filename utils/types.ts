@@ -13,23 +13,15 @@ export interface UserInfo {
   idx: Number;
   name : string;
   avatar? : string;
-  join_date? : Date;
+  join_date : Date;
 }
 
 export interface Message {
   room_idx: string;
   images?: Array<string>;
   text: string;
+  date: Date;
 }
-
-export interface PrivateMessage {
-  to_idx: Number;
-  user: UserInfo
-  images?: string;
-  text: string;
-  date_time: string;
-}
-
 export interface Room {
   idx: string;
   users: Array<UserInfo>;

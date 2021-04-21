@@ -1,10 +1,11 @@
 import { UserInfo } from './types'
 import { rooms } from './rooms'
 
+export const users: Array<UserInfo> = []
+
 export const joinUser = (userInfo: UserInfo, room_idx: string) => {
   rooms.some(room => {
     if(room.idx === room_idx){
-      userInfo.join_date = new Date()
       const index = room.users.findIndex(user => user.idx === userInfo.idx)
       if(index === -1){
         room.users.push(userInfo)
@@ -32,14 +33,5 @@ export const getCurrentUser = (socket_idx: string, room_idx: string) : (UserInfo
       return true
     }
   })
-  if(currentUser){
-    return currentUser
-  }
-  return null
+  return currentUser
 }
-// export const leaveUser = (socket_idx : string) => {
-//   const index = users.findIndex(user => user.socket_idx === socket_idx);
-//   if(index !== -1) {
-//       return users.splice(index, 1)[0];
-//   }
-// }

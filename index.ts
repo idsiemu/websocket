@@ -5,9 +5,9 @@ import redis from 'redis'
 import secret from './secret'
 import { promisify } from 'util'
 import { formatMessage } from "./utils/messages";
-import {JoinInfo, Message, PrivateMessage, UserInfo} from './utils/types'
+import {JoinInfo, Message, UserInfo} from './utils/types'
 import { joinUser, getCurrentUser } from './utils/users'
-import { getRoomUsers } from './utils/rooms'
+import { getRoomUsers, leaveRoom, setRoom } from './utils/rooms'
 
 const app = express();
 
@@ -31,68 +31,56 @@ const redisGetAsync = promisify(client.get).bind(client)
 io.on('connect', (socket) => {
   socket.on('joinRoom', async(joinInfo : JoinInfo) => {
     joinInfo.userInfo.socket_idx = socket.id;
+    setRoom(joinInfo.roomInfo.idx)
     joinUser(joinInfo.userInfo, joinInfo.roomInfo.idx)
     socket.join(joinInfo.roomInfo.idx)
 
-    socket.emit('message', formatMessage(joinInfo.userInfo.name, '환영합니다.'));
+    socket.emit('message', formatMessage(joinInfo.userInfo.name, '환영합니다.', new Date()));
 
-    socket.broadcast.to(joinInfo.roomInfo.idx).emit('message', formatMessage(joinInfo.userInfo.name, `${joinInfo.userInfo.name} 님이 ${joinInfo.roomInfo.name}방에 입장하셨습니다`));
+    socket.broadcast.to(joinInfo.roomInfo.idx).emit('message', formatMessage(joinInfo.userInfo.name, `${joinInfo.userInfo.name} 님이 ${joinInfo.roomInfo.name}방에 입장하셨습니다`, new Date()));
 
     io.to(joinInfo.roomInfo.idx).emit('roomUsers', {
       users: getRoomUsers(joinInfo.roomInfo.idx)
     });
-    // 참여 상태인 유저를 찾아서 기존에 있던 히스토리를 다시 보여준다.
-    // const usersData = await redisGetAsync(`${joinInfo.roomInfo.idx.toString()}-users`)
-    // const messagesData = await redisGetAsync(`${joinInfo.roomInfo.idx.toString()}-messages`)
-    // if(usersData){
-    //   const usersJson = JSON.parse(usersData)
-    //   usersJson.some((user: UserInfo) => {
-    //     if(user.idx === joinInfo.userInfo.idx){
-    //       if(user.join_date) {
-    //         const messagesJson = JSON.parse(messagesData)
-
-    //       }
-    //       return true
-    //     }
-    //   })
-    // }else{
-    //   const json = JSON.stringify(joinInfo.userInfo)
-    //   client.lpush(`${joinInfo.roomInfo.idx.toString()}-users`, json)
-    // }
-    // if(messageData){
-    //   const json = JSON.parse(messageData)
-    //   socket.emit('history', json)
-    // }
-    
+    const messagesData = await redisGetAsync(joinInfo.roomInfo.idx)
+    if(messagesData){
+      const messages : Array<{message: Message, user: UserInfo}> = JSON.parse(messagesData)
+      const filter = messages.filter(list => list.message.date >= joinInfo.userInfo.join_date)
+      socket.emit('history', filter)
+    }
   })
 
   socket.on('chatMessage', (message: Message) => {
     const user : UserInfo | null = getCurrentUser(socket.id, message.room_idx)
-    // saveMessage(message) // redis 에 메시지 인서트
-    // socket.broadcast.to(message.room_idx.toString()).emit('message', message);
     if(user){
-      io.to(message.room_idx).emit("message", formatMessage(user.name, message.text))
+      saveMessage(message, user) // redis 에 메시지 인서트
+      io.to(message.room_idx).emit("message", formatMessage(user.name, message.text, message.date, user.avatar, message.images ))
     }
   })
 
   socket.on('disconnect', () => {
-
+    const room_idx = leaveRoom(socket.id);
+    io.to(room_idx).emit('roomUsers', {
+      users: getRoomUsers(room_idx)
+    });
   })
-
-  
 })
-const saveMessage = async(message: Message) => {
-  const room_idx = message.room_idx.toString();
+const saveMessage = async(message: Message, user : UserInfo) => {
+  const room_idx = message.room_idx
 
   const data = await redisGetAsync(room_idx)
 
-  if(!data){
-    client.set(room_idx, "[]")
-    return
+  if(data){
+    const json = JSON.parse(data)
+    json.push({message, user});
+    // redis에 각 방마다 40개의 메시지를 가지고 있는다
+    if(json.length > 50){
+      json.shift()
+    }
+    client.set(room_idx, JSON.stringify(json))
+  }else{
+    const json = [{message, user}]
+    client.set(room_idx, JSON.stringify(json))
   }
-
-  const json = JSON.parse(data)
-  json.push(message);
-
-  client.set(room_idx, JSON.stringify(json))
+  // api 로 실제 디비에 인스트요청 아마 파이어베이스
 }
